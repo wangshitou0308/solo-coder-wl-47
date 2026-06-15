@@ -132,9 +132,8 @@ def feedback_citizen_report(
     report = db.query(CitizenReport).filter(CitizenReport.id == report_id).first()
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="上报记录不存在")
-    if not report.is_resolved:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="上报尚未解决，无法提交反馈")
     report.feedback = feedback_in.feedback
+    report.is_resolved = True
     db.commit()
     db.refresh(report)
     return report

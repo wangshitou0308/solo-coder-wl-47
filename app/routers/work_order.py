@@ -13,6 +13,7 @@ from app.models.models import (
     WaterPointStatus,
     User,
     UserRole,
+    CitizenReport,
 )
 from app.schemas.work_order import WorkOrderCreate, WorkOrderAssign, WorkOrderComplete, WorkOrderOut
 from app.utils.security import get_current_user
@@ -131,6 +132,11 @@ def complete_work_order(
     if not work_order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="工单不存在")
 
+    is_assigned_user = work_order.assigned_to == current_user.id
+    is_admin_or_supervisor = current_user.role in (UserRole.ADMIN, UserRole.MAINTENANCE_SUPERVISOR)
+    if not is_assigned_user and not is_admin_or_supervisor:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有被指派人员或管理员/运维主管可以完成工单")
+
     work_order.status = WorkOrderStatus.COMPLETED
     work_order.completed_at = datetime.utcnow()
     work_order.feedback = complete_in.feedback
@@ -139,6 +145,13 @@ def complete_work_order(
         water_point = db.query(WaterPoint).filter(WaterPoint.id == work_order.water_point_id).first()
         if water_point and water_point.status == WaterPointStatus.DISABLED:
             water_point.status = WaterPointStatus.ONLINE
+
+    if work_order.order_type == WorkOrderType.COMPLAINT:
+        citizen_report = db.query(CitizenReport).filter(CitizenReport.work_order_id == work_order.id).first()
+        if citizen_report and not citizen_report.is_resolved:
+            citizen_report.is_resolved = True
+            if complete_in.feedback and not citizen_report.feedback:
+                citizen_report.feedback = complete_in.feedback
 
     db.commit()
     db.refresh(work_order)
@@ -156,6 +169,12 @@ def close_work_order(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="工单不存在")
 
     work_order.status = WorkOrderStatus.CLOSED
+
+    if work_order.order_type == WorkOrderType.COMPLAINT:
+        citizen_report = db.query(CitizenReport).filter(CitizenReport.work_order_id == work_order.id).first()
+        if citizen_report and not citizen_report.is_resolved:
+            citizen_report.is_resolved = True
+
     db.commit()
     db.refresh(work_order)
     return work_order
